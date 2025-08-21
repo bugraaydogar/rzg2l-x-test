@@ -1,0 +1,257 @@
+name: ren-x-test
+
+summary: xtest for optee
+description: |
+ This is xtest for Renesas RZG2L silicons
+version: 3.x
+type: app
+
+base: core24
+
+platforms:
+  arm64:
+    build-on:  [amd64, arm64]
+    build-for: [arm64]
+
+confinement: strict
+grade: stable
+
+environment:
+    LD_LIBRARY_PATH: ${SNAP}/tmp/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}
+    PATH: ${SNAP}/bin:${SNAP}/tmp/bin:${SNAP}/tmp/usr/sbin:${PATH}
+
+
+layout:
+    /usr/lib/optee_armtz:
+        bind: $SNAP_COMMON/lib/optee_armtz
+    /usr/lib/tee-supplicant/plugins:
+        bind: $SNAP_COMMON/usr/lib/tee-supplicant/plugins
+
+apps:
+    xtest:
+        command: bin/wrapper xtest
+        plugs:
+            - network-bind
+            - tee
+            - home
+            - xtest
+    sign-ta:
+        command: bin/wrapper sign-ta
+        plugs:
+            - xtest
+    unsign-ta:
+        command: bin/wrapper unsign-ta
+        plugs:
+            - xtest
+
+    import:
+        command: bin/wrapper import
+
+
+parts:
+    optee-keys:
+        plugin: dump
+        source: https://git.launchpad.net/~ondrak/+git/dev-keys
+        source-type: git
+        source-branch: ta-keys
+        organize:
+            '*': ta-keys/
+        prime:
+            - -*
+
+    tee-kit:
+        after:
+            - optee-keys
+        plugin: nil
+        override-build: |
+            git clone -b 3.19.0/rz https://github.com/renesas-rz/rzg_optee-os.git optee_os
+            git clone https://github.com/OP-TEE/optee_client.git
+            git clone https://github.com/OP-TEE/optee_test.git
+            cp -r optee_* ${SNAPCRAFT_PART_SRC}/
+            # pip3 install -U cryptography>=35.0.0
+            rm -fr *
+
+            for ver in 19
+            do
+                version=3."${ver}".0
+                mkdir -p ${SNAPCRAFT_PART_INSTALL}/"${version}"
+
+                # optee-os procedure
+                cd ${SNAPCRAFT_PART_BUILD}
+                cp -r ${SNAPCRAFT_PART_SRC}/optee_os .
+                cd optee_os
+
+            cat << EOF > build.sh
+                #! /bin/bash
+                export ARCH="arm"
+                export CROSS_COMPILE="${CRAFT_ARCH_TRIPLET_BUILD_FOR}-"
+                export CROSS_COMPILE_core="${CRAFT_ARCH_TRIPLET_BUILD_FOR}-"
+                export CROSS_COMPILE_ta_arm64="${CRAFT_ARCH_TRIPLET_BUILD_FOR}-"
+                export CFG_USER_TA_TARGETS="ta_arm64"
+                export CFG_ARM64_core=y
+                export DEBUG=1 \
+                export CFG_TEE_CORE_LOG_LEVEL=4 \
+                export CFG_TEE_TA_LOG_LEVEL=4 \
+                export CFG_CORE_HEAP_SIZE=0x00100000
+                export CFG_TEE_RAM_VA_SIZE=0x00280000
+                export CFG_CRYPTO_WITH_CE=n
+                export CFG_RZ_SCE=n
+                export CFG_REE_FS=y
+                export CFG_RPMB_FS=n
+                export PLATFORM=rz
+                export PLATFORM_FLAVOR=g2l_smarc_2
+
+                export TA_PUBLIC_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
+                export TA_PUBLIC_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
+                make O=${SNAPCRAFT_PART_BUILD}/optee_os/out -j$(nproc)
+            EOF
+                chmod +x build.sh
+                sh build.sh
+                cp -r ${SNAPCRAFT_PART_BUILD}/optee_os/out/export-ta_arm* ${SNAPCRAFT_PART_INSTALL}/"${version}"/export-ta_arm
+
+
+                # optee-client procedure
+                cd ${SNAPCRAFT_PART_BUILD}
+                cp -r ${SNAPCRAFT_PART_SRC}/optee_client .
+                cd optee_client
+                git checkout "${version}"
+
+            cat << EOF > build.sh
+                #! /bin/bash
+                export ARCH="arm64"
+                export LDFLAGS="-Wl,--strip-all"
+                export DEBUG=0 \
+                export CROSS_COMPILE="${CRAFT_ARCH_TRIPLET_BUILD_FOR}-"
+                export CFG_TEE_CLIENT_LOAD_PATH="" \
+                export CFG_TA_TEST_PATH=0 \
+                export CFG_TEE_SUPP_LOG_LEVEL=0 \
+                export SBINDIR=/usr/sbin
+                export LIBDIR="/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}"
+
+                # we need new python cryptography
+                make -j$(nproc)
+            EOF
+                chmod +x build.sh
+                sh build.sh
+                cp -r out/export/usr "${SNAPCRAFT_PART_INSTALL}"/"${version}"/
+
+                # optee-test
+                cd ${SNAPCRAFT_PART_BUILD}
+                cp -r ${SNAPCRAFT_PART_SRC}/optee_test .
+                cd optee_test
+                git checkout "${version}"
+
+            cat << EOF > build.sh
+                #! /bin/bash
+                export CROSS_COMPILE="${CRAFT_ARCH_TRIPLET_BUILD_FOR}-"
+                export TA_DEV_KIT_DIR="${SNAPCRAFT_PART_INSTALL}/${version}/export-ta_arm"
+                export CFG_TEE_CLIENT_LOG_LEVEL="2"
+                export OPTEE_CLIENT_EXPORT="${SNAPCRAFT_PART_INSTALL}/${version}/usr"
+                export DESTDIR="${SNAPCRAFT_PART_INSTALL}/${version}"
+                export WITH_OPENSSL="y"
+                export CFG_PKCS11_TA="y"
+                export BINDIR="/usr/bin"
+                export LIBDIR="/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}"
+                export SBINDIR="/usr/sbin"
+                export ARCH="${CRAFT_ARCH_BUILD_FOR}"
+                export CFG_USER_TA_TARGETS="ta_arm64"
+                export CROSS_COMPILE_ta_arm64="${CRAFT_ARCH_TRIPLET_BUILD_FOR}-"
+                export O="${SNAPCRAFT_PART_BUILD}/optee_test/out"
+                export LDFLAGS="-L${SNAPCRAFT_PART_INSTALL}/${version}/usr/lib -L${SNAPCRAFT_PART_INSTALL}/${version}/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}"
+                export CPPFLAGS=-isystem${SNAPCRAFT_PART_INSTALL}/${version}/usr/include
+                export CFLAGS=-isystem${SNAPCRAFT_PART_INSTALL}/${version}/usr/include
+                export TA_PUBLIC_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
+                export TA_PUBLIC_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
+                make -j$(nproc)
+                make install
+
+            EOF
+                chmod +x build.sh
+                sh build.sh
+
+                #Post build procedure
+                cp ${SNAPCRAFT_PART_INSTALL}/"${version}"/export-ta_arm/scripts/sign_encrypt.py ${SNAPCRAFT_PART_INSTALL}/"${version}"/bin
+                cd ${SNAPCRAFT_PART_BUILD}
+                rm -fr ${SNAPCRAFT_PART_INSTALL}/"${version}"/export-ta_arm
+                rm -fr *
+            done
+    wrapper:
+        plugin: nil
+        override-build: |
+            cat << EOF > wrapper
+            #! /bin/bash
+            cmd="\$1"
+            shift
+            if [ "\$cmd" == "xtest" ]
+            then
+                if [ "\$1" == "--install-ta" ]
+                then
+                    "\$cmd" "\$1" \$SNAP_COMMON/lib/optee_armtz
+                elif [ "\$1" == "-t" ]
+                then
+                    "\$cmd" "\$@"
+                else
+                    "\$cmd" --install-ta \$SNAP_COMMON/lib/optee_armtz
+                    "\$cmd" "\$@"
+                fi
+            elif [ "\$cmd" == "sign-ta" ]
+            then
+                for ta in \$SNAP/tmp/unsigned_elf/*
+                do
+                    ta_name=\`basename \$ta\`
+                    user_ta_uuid=\`echo \$ta_name | awk -F. '{print \$1}'\`
+                    sign_encrypt.py \\
+                    \$@ \\
+                    --uuid \$user_ta_uuid \\
+                    --ta-version 0 \\
+                    --in \$SNAP/tmp/unsigned_elf/"\$user_ta_uuid".stripped.elf --out \$SNAP_COMMON/lib/optee_armtz/"\$user_ta_uuid".ta
+                done
+            elif [ "\$cmd" == "unsign-ta" ]
+            then
+                cp \$SNAP/tmp/lib/optee_armtz/* \$SNAP_COMMON/lib/optee_armtz
+            elif [ "\$cmd" == "import" ]
+            then
+                rm -f \$SNAP_COMMON/lib/optee_armtz/*
+                cp \$@/* \$SNAP_COMMON/lib/optee_armtz
+            fi
+
+            EOF
+
+            chmod +x wrapper
+            mkdir ${SNAPCRAFT_PART_INSTALL}/bin
+            mkdir ${SNAPCRAFT_PART_INSTALL}/tmp
+            cp wrapper ${SNAPCRAFT_PART_INSTALL}/bin
+            mkdir -p ${SNAPCRAFT_PART_INSTALL}/lib/optee_armtz
+
+
+build-packages:
+    - git
+    - bison
+    - build-essential
+    - device-tree-compiler
+    - flex
+    - libxml2-dev
+    - libssl-dev
+    - python3
+    - python3-cryptography
+    - python3-pip
+    - python3-pyelftools
+    - python3-pycryptodome
+    - wget
+    - pkg-config
+    - uuid-dev
+    - zlib1g-dev
+    - libffi-dev
+    - python3-dev
+
+plugs:
+    xtest:
+        interface: content
+        target: $SNAP/tmp
+slots:
+    xtest-319:
+        interface: content
+        content: xtest
+        read:
+            - $SNAP/3.19.0
+
