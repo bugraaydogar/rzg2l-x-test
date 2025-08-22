@@ -1,6 +1,5 @@
-name: ren-x-test
-
-summary: xtest for optee
+name: rzg2l-optee-xtest
+summary: optee xtest for Renesas RZG2L
 description: |
  This is xtest for Renesas RZG2L silicons
 version: 3.x
@@ -101,7 +100,7 @@ parts:
                 export PLATFORM=rz
                 export PLATFORM_FLAVOR=g2l_smarc_2
 
-                export TA_PUBLIC_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
+                # export TA_SIGN_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
                 export TA_PUBLIC_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
                 make O=${SNAPCRAFT_PART_BUILD}/optee_os/out -j$(nproc)
             EOF
@@ -160,7 +159,7 @@ parts:
                 export LDFLAGS="-L${SNAPCRAFT_PART_INSTALL}/${version}/usr/lib -L${SNAPCRAFT_PART_INSTALL}/${version}/usr/lib/${CRAFT_ARCH_TRIPLET_BUILD_FOR}"
                 export CPPFLAGS=-isystem${SNAPCRAFT_PART_INSTALL}/${version}/usr/include
                 export CFLAGS=-isystem${SNAPCRAFT_PART_INSTALL}/${version}/usr/include
-                export TA_PUBLIC_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
+                export TA_SIGN_KEY="${CRAFT_STAGE}/ta-keys/ta_private.pem"
                 export TA_PUBLIC_KEY="${CRAFT_STAGE}/ta-keys/ta_public.pem"
                 make -j$(nproc)
                 make install
