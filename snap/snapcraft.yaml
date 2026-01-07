@@ -34,6 +34,14 @@ apps:
             - tee
             - home
             - xtest
+    tee-supplicant:
+        command: bin/wrapper tee-supplicant
+        daemon: simple
+        install-mode: disable
+        plugs:
+            - tee
+            - network
+            - xtest
     sign-ta:
         command: bin/wrapper sign-ta
         plugs:
@@ -177,41 +185,52 @@ parts:
     wrapper:
         plugin: nil
         override-build: |
-            cat << EOF > wrapper
+            cat << 'EOF' > wrapper
             #! /bin/bash
-            cmd="\$1"
+            cmd="$1"
             shift
-            if [ "\$cmd" == "xtest" ]
+            if [ "$cmd" == "xtest" ]
             then
-                if [ "\$1" == "--install-ta" ]
+                if [ "$1" == "--install-ta" ]
                 then
-                    "\$cmd" "\$1" \$SNAP_COMMON/lib/optee_armtz
-                elif [ "\$1" == "-t" ]
+                    "$cmd" "$1" $SNAP_COMMON/lib/optee_armtz
+                elif [ "$1" == "-t" ]
                 then
-                    "\$cmd" "\$@"
+                    "$cmd" "$@"
                 else
-                    "\$cmd" --install-ta \$SNAP_COMMON/lib/optee_armtz
-                    "\$cmd" "\$@"
+                    "$cmd" --install-ta $SNAP_COMMON/lib/optee_armtz
+                    "$cmd" "$@"
                 fi
-            elif [ "\$cmd" == "sign-ta" ]
+            elif [ "$cmd" == "tee-supplicant" ]
             then
-                for ta in \$SNAP/tmp/unsigned_elf/*
+                if ! snapctl is-connected xtest; then
+                    echo "Please connect the "xtest" interface:"
+                    echo "  sudo snap connect x-test:xtest x-test:xtest-<319>"
+                    echo "and then start tee-supplicant service"
+                    echo "  sudo snap start x-test.tee-supplicant"
+                    exit 1
+                else
+                    "$cmd" --fs-parent-path $SNAP_COMMON/lib/optee-fs --ta-dir $SNAP_COMMON/lib/optee_armtz --plugin-path $SNAP_COMMON/usr/lib/tee-supplicant/plugins
+                fi
+            elif [ "$cmd" == "sign-ta" ]
+            then
+                for ta in $SNAP/tmp/unsigned_elf/*
                 do
-                    ta_name=\`basename \$ta\`
-                    user_ta_uuid=\`echo \$ta_name | awk -F. '{print \$1}'\`
-                    sign_encrypt.py \\
-                    \$@ \\
-                    --uuid \$user_ta_uuid \\
-                    --ta-version 0 \\
-                    --in \$SNAP/tmp/unsigned_elf/"\$user_ta_uuid".stripped.elf --out \$SNAP_COMMON/lib/optee_armtz/"\$user_ta_uuid".ta
+                    ta_name=`basename $ta`
+                    user_ta_uuid=`echo $ta_name | awk -F. '{print $1}'`
+                    sign_encrypt.py \
+                    $@ \
+                    --uuid $user_ta_uuid \
+                    --ta-version 0 \
+                    --in $SNAP/tmp/unsigned_elf/"$user_ta_uuid".stripped.elf --out $SNAP_COMMON/lib/optee_armtz/"$user_ta_uuid".ta
                 done
-            elif [ "\$cmd" == "unsign-ta" ]
+            elif [ "$cmd" == "unsign-ta" ]
             then
-                cp \$SNAP/tmp/lib/optee_armtz/* \$SNAP_COMMON/lib/optee_armtz
-            elif [ "\$cmd" == "import" ]
+                cp $SNAP/tmp/lib/optee_armtz/* $SNAP_COMMON/lib/optee_armtz
+            elif [ "$cmd" == "import" ]
             then
-                rm -f \$SNAP_COMMON/lib/optee_armtz/*
-                cp \$@/* \$SNAP_COMMON/lib/optee_armtz
+                rm -f $SNAP_COMMON/lib/optee_armtz/*
+                cp $@/* $SNAP_COMMON/lib/optee_armtz
             fi
 
             EOF

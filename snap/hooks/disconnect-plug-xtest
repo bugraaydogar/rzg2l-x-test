@@ -1,3 +1,4 @@
 #! /bin/bash
 
 rm -f $SNAP_COMMON/lib/optee_armtz/*
+rm -f $SNAP_COMMON/usr/lib/tee-supplicant/plugins/*
